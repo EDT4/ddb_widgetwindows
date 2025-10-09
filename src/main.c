@@ -9,16 +9,23 @@
 DB_functions_t *deadbeef;
 ddb_gtkui_t *gtkui_plugin;
 
+//#define MAX(a,b) ((a)>=(b)? (a) : (b))
+
 #define WIDGETDIALOG_CONFIG_LAYOUT "widgetdialog.layout"
-#define WIDGETDIALOG_CONFIG_WIDTH  "widgetdialog.window.width"
-#define WIDGETDIALOG_CONFIG_HEIGHT "widgetdialog.window.height"
+#define WIDGETDIALOG_CONFIG_WIDTH  "widgetdialog.width"
+#define WIDGETDIALOG_CONFIG_HEIGHT "widgetdialog.height"
+
+#define CONFIG_MAX_LEN MAX(sizeof(WIDGETDIALOG_CONFIG_LAYOUT),MAX(sizeof(WIDGETDIALOG_CONFIG_WIDTH),sizeof(WIDGETDIALOG_CONFIG_HEIGHT)))
 
 //An instance is additional data to an action.
 //All actions in this plugin should always be attached to a struct instance_s.
 struct instance_s{
 	GtkDialog *dialog;
 	ddb_gtkui_widget_t *root_container;
-	char name[200];
+	char config_id[50];
+	char action_id[50];
+	char action_title[100];
+	char dialog_title[100];
 	int width;
 	int height;
 	DB_plugin_action_t action;
@@ -64,14 +71,16 @@ static int widgetdialog_dialog_create(void *user_data){
 	inst->dialog = GTK_DIALOG(gtk_dialog_new());
 		gtk_window_set_transient_for(GTK_WINDOW(inst->dialog),GTK_WINDOW(main_window));
 		gtk_window_set_default_size(GTK_WINDOW(inst->dialog),inst->width,inst->height);
-		gtk_window_set_title(GTK_WINDOW(inst->dialog),"Testing");
+		gtk_window_set_title(GTK_WINDOW(inst->dialog),inst->dialog_title);
 		gtk_window_set_modal(GTK_WINDOW(inst->dialog),false);
 		gtk_window_set_destroy_with_parent(GTK_WINDOW(inst->dialog),true);
 		g_signal_connect(G_OBJECT(inst->dialog),"destroy",G_CALLBACK(widgetdialog_on_dialog_destroy),inst);
 		g_signal_connect(G_OBJECT(inst->dialog),"configure-event",G_CALLBACK(widgetdialog_on_resize),inst);
 
 		//Root widget.
-		rootwidget_init(&inst->root_container,WIDGETDIALOG_CONFIG_LAYOUT);
+		char buffer[sizeof(WIDGETDIALOG_CONFIG_LAYOUT) + 1 + sizeof(inst->config_id) + 1];
+		snprintf(buffer,sizeof(buffer),"%s.%s",WIDGETDIALOG_CONFIG_LAYOUT,inst->config_id);
+		rootwidget_init(&inst->root_container,buffer);
 		gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(inst->dialog)),inst->root_container->widget,true,true,0);
 
 		gtk_widget_show(GTK_WIDGET(inst->dialog));
@@ -90,10 +99,11 @@ static int action_toggle_dialog_callback(DB_plugin_action_t *action,__attribute_
 	return 0;
 }
 
-static struct instance_s *instance_add(const char *id){
+static struct instance_s *instance_add(){
 	struct instance_s *inst = malloc(sizeof(struct instance_s));
 	if(!inst) return NULL;
 
+	//Append to the linked list.
 	if(!widgetdialog.insts){
 		widgetdialog.insts = inst;
 	}else{
@@ -105,15 +115,14 @@ static struct instance_s *instance_add(const char *id){
 	inst->dialog = NULL;
 	inst->root_container = NULL;
 
-	inst->width = deadbeef->conf_get_int(WIDGETDIALOG_CONFIG_WIDTH,256);
-	if(inst->width < 16) inst->width = 16;
-
-	inst->height = deadbeef->conf_get_int(WIDGETDIALOG_CONFIG_HEIGHT,256);
-	if(inst->height < 16) inst->height = 16;
+	inst->config_id   [0] = '\0';
+	inst->action_id   [0] = '\0';
+	inst->action_title[0] = '\0';
+	inst->dialog_title[0] = '\0';
 
 	inst->action = (DB_plugin_action_t){
-		.title = "Toggle dialog",
-		.name = "widgetdialog_toggle",
+		.title = inst->action_title,
+		.name = inst->action_id,
 		.flags = DB_ACTION_COMMON | DB_ACTION_ADD_MENU,
 		.callback2 = action_toggle_dialog_callback,
 		.next = NULL
@@ -122,15 +131,51 @@ static struct instance_s *instance_add(const char *id){
 	return inst;
 }
 
+static void instance_config_init(struct instance_s *inst){
+	char buffer[CONFIG_MAX_LEN + 1 + sizeof(inst->config_id) + 1];
+
+	snprintf(buffer,sizeof(buffer),"%s.%s",WIDGETDIALOG_CONFIG_WIDTH,inst->config_id);
+	puts(buffer);
+	inst->width = deadbeef->conf_get_int(buffer,256);
+	if(inst->width < 16) inst->width = 16;
+
+	snprintf(buffer,sizeof(buffer),"%s.%s",WIDGETDIALOG_CONFIG_HEIGHT,inst->config_id);
+	puts(buffer);
+	inst->height = deadbeef->conf_get_int(buffer,256);
+	if(inst->height < 16) inst->height = 16;
+}
+
 static void instance_save(struct instance_s *inst){
-	deadbeef->conf_set_int(WIDGETDIALOG_CONFIG_WIDTH,inst->width);
-	deadbeef->conf_set_int(WIDGETDIALOG_CONFIG_HEIGHT,inst->height);
-	rootwidget_save(inst->root_container,WIDGETDIALOG_CONFIG_LAYOUT);
+	char buffer[CONFIG_MAX_LEN + 1 + sizeof(inst->config_id) + 1];
+
+	snprintf(buffer,sizeof(buffer),"%s.%s",WIDGETDIALOG_CONFIG_WIDTH,inst->config_id);
+	deadbeef->conf_set_int(buffer ,inst->width);
+
+	snprintf(buffer,sizeof(buffer),"%s.%s",WIDGETDIALOG_CONFIG_HEIGHT,inst->config_id);
+	deadbeef->conf_set_int(buffer,inst->height);
+
+	snprintf(buffer,sizeof(buffer),"%s.%s",WIDGETDIALOG_CONFIG_LAYOUT,inst->config_id);
+	rootwidget_save(inst->root_container,buffer);
 }
 
 static int widgetdialog_start(){
 	widgetdialog.insts = NULL;
-	instance_add("test");
+	struct instance_s *inst;
+
+	inst = instance_add();
+	strlcpy(inst->config_id,"d1",sizeof(inst->config_id));
+	strlcpy(inst->action_id,"widgetdialog_toggle",sizeof(inst->action_id));
+	strlcpy(inst->action_title,"View/Dialog 1",sizeof(inst->action_title));
+	strlcpy(inst->dialog_title,"Dialog 1",sizeof(inst->dialog_title));
+	instance_config_init(inst);
+
+	inst = instance_add();
+	strlcpy(inst->config_id,"d2",sizeof(inst->config_id));
+	strlcpy(inst->action_id,"widgetdialog_toggle2",sizeof(inst->action_id));
+	strlcpy(inst->action_title,"View/Dialog 2",sizeof(inst->action_title));
+	strlcpy(inst->dialog_title,"Dialog 2",sizeof(inst->dialog_title));
+	instance_config_init(inst);
+
 	return 0;
 }
 
