@@ -66,9 +66,7 @@ static void instance_save(struct instance_s *inst){
 static void widgetdialog_on_dialog_destroy(__attribute__((unused)) GtkDialog* self,gpointer user_data){
 	struct instance_s *inst = (struct instance_s*)user_data;
 
-	if(gtkui_plugin->w_get_design_mode()){ //TODO: Makes design mode a requirement to save when closing. What are the alternatives? Wasteful to always save?
-		instance_save(inst);
-	}
+	instance_save(inst);
 
 	for(ddb_gtkui_widget_t *c = inst->root_container->children; c; c = c->next){
 		gtkui_plugin->w_remove(inst->root_container,c);
