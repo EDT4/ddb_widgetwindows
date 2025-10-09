@@ -142,12 +142,10 @@ static struct instance_s *instance_add(const char *id,const char *title){
 		char buffer[CONFIG_MAX_LEN + 1 + sizeof(inst->config_id) + 1];
 
 		snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_WIDTH,inst->config_id);
-		puts(buffer);
 		inst->width = deadbeef->conf_get_int(buffer,256);
 		if(inst->width < 16) inst->width = 16;
 
 		snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_HEIGHT,inst->config_id);
-		puts(buffer);
 		inst->height = deadbeef->conf_get_int(buffer,256);
 		if(inst->height < 16) inst->height = 16;
 	}
@@ -227,16 +225,21 @@ static ddb_widgetdialog_t plugin ={
 	.misc.plugin.version_major = 1,
 	.misc.plugin.version_minor = 0,
 	.misc.plugin.type = DB_PLUGIN_MISC,
-	.misc.plugin.id = "widgetdialog-gtk3",
+	#if GTK_CHECK_VERSION(3,0,0)
+	.misc.plugin.id = "widgetdialog_gtk3",
+	#else
+	.misc.plugin.id = "widgetdialog_gtk2",
+	#endif
 	.misc.plugin.name = "Widget Dialog",
 	.misc.plugin.descr =
 		"Customisable widget dialogs.\n"
 		"Set the number of dialogs in the plugin configuration. Restart for changes.\n"
 		"Open a dialog by using the actions found in \"View/Dialog *\" (widgetdialog_toggle_*).\n"
 		"In the new dialog, widgets can be added and modified in Design Mode.\n"
-		"To save the layout changes made in a dialog, the window must be closed while in Design Mode.\n",
+		"To save the layout changes made in a dialog, the window must be closed while in Design Mode.\n"
 		"\n"
 		"This plugin is not finished as of writing, but should be functional.\n"
+	,
 	.misc.plugin.copyright =
 		"MIT License\n"
 		"\n"
@@ -276,7 +279,13 @@ static ddb_widgetdialog_t plugin ={
 };
 
 __attribute__((visibility("default")))
-DB_plugin_t * widgetdialog_gtk3_load(DB_functions_t *api){
+DB_plugin_t *
+#if GTK_CHECK_VERSION(3,0,0)
+widgetdialog_gtk3_load
+#else
+widgetdialog_gtk2_load
+#endif
+(DB_functions_t *api){
 	deadbeef = api;
 	return DB_PLUGIN(&plugin);
 }

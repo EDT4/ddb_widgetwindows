@@ -26,6 +26,11 @@ debug: GTK=gtk+-3.0
 debug: CFLAGS+= -g
 debug: $(OUT_DIR) $(SOURCES) $(OUT_DIR)/widgetdialog_gtk3_debug.so
 
+gtk2: GTKMM=gtkmm-2.4
+gtk2: GTK=gtk+-2.0
+gtk2: CFLAGS+= -DNDEBUG
+gtk2: $(OUT_DIR) $(SOURCES) $(OUT_DIR)/widgetdialog_gtk2.so
+
 gtk3: GTKMM=gtkmm-3.0
 gtk3: GTK=gtk+-3.0
 gtk3: CFLAGS+= -DNDEBUG
