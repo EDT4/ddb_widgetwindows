@@ -10,103 +10,127 @@ DB_functions_t *deadbeef;
 ddb_gtkui_t *gtkui_plugin;
 
 #define WIDGETDIALOG_CONFIG_LAYOUT "widgetdialog.layout"
+#define WIDGETDIALOG_CONFIG_WIDTH  "widgetdialog.window.width"
+#define WIDGETDIALOG_CONFIG_HEIGHT "widgetdialog.window.height"
 
-struct widgetdialog_t{
+//An instance is additional data to an action.
+//All actions in this plugin should always be attached to a struct instance_s.
+struct instance_s{
 	GtkDialog *dialog;
 	ddb_gtkui_widget_t *root_container;
+	char name[200];
 	int width;
 	int height;
+	DB_plugin_action_t action;
+};
+
+struct widgetdialog_s{
+	struct instance_s *insts;
 } widgetdialog;
 
-static void widgetdialog_root_widget_init(ddb_gtkui_widget_t **container,const char *conf_field){
-	*container = gtkui_plugin->w_create("box");
-	gtk_widget_show((*container)->widget);
+//Only for the actions in this plugin.
+//Okay because they should all be part of the larger struct instance_s.
+static inline struct instance_s *action_get_instance(DB_plugin_action_t *ptr){return (struct instance_s*)(((unsigned char*)ptr)-offsetof(struct instance_s,action));}
 
-	ddb_gtkui_widget_t *w = NULL;
-	deadbeef->conf_lock();
-	const char *json = deadbeef->conf_get_str_fast(conf_field,NULL);
-	if(json){
-		json_t *layout = json_loads(json,0,NULL);
-		if(layout != NULL){
-			if(w_create_from_json(layout,&w) >= 0){
-				gtkui_plugin->w_append(*container,w);
-			}
-			json_delete(layout);
-		}
-	}
-	deadbeef->conf_unlock();
+//Just uses the linked list of the action.
+static inline struct instance_s *instance_next(struct instance_s *inst){return inst->action.next? action_get_instance(inst->action.next) : NULL;}
 
-	if(!w){
-		w = gtkui_plugin->w_create("placeholder");
-		gtkui_plugin->w_append(*container,w);
-	}
+static bool widgetdialog_on_resize(__attribute__((unused)) GtkWidget* self,__attribute__((unused)) GdkEventConfigure *event,gpointer user_data){
+	struct instance_s *inst = (struct instance_s*)user_data;
+	//TODO: also possible to use width/height of event
+	gtk_window_get_size(GTK_WINDOW(inst->dialog),&inst->width,&inst->height);
+	return false;
 }
 
-static void widgetdialog_root_widget_save(ddb_gtkui_widget_t *container,const char *conf_field){
-	if(!container || !container->children) return;
+static void widgetdialog_on_dialog_destroy(__attribute__((unused)) GtkDialog* self,gpointer user_data){
+	struct instance_s *inst = (struct instance_s*)user_data;
 
-	json_t *layout = w_save_widget_to_json(container->children);
-	if(layout){
-		char *layout_str = json_dumps(layout,JSON_COMPACT);
-		if(layout_str){
-			deadbeef->conf_set_str(conf_field,layout_str);
-			free(layout_str);
-		}
-		json_delete(layout);
-	}
-}
-
-
-void widgetdialog_on_resize(GtkDialog* self,gpointer user_data){
-	gtk_window_get_size(GTK_WINDOW(widgetdialog.dialog),&widgetdialog.width,&widgetdialog.height);
-}
-
-void widgetdialog_on_dialog_destroy(GtkDialog* self,gpointer user_data){
-	for(ddb_gtkui_widget_t *c = widgetdialog.root_container->children; c; c = c->next){
-		gtkui_plugin->w_remove(widgetdialog.root_container,c);
+	for(ddb_gtkui_widget_t *c = inst->root_container->children; c; c = c->next){
+		gtkui_plugin->w_remove(inst->root_container,c);
 		gtkui_plugin->w_destroy(c);
 	}
 
-	gtkui_plugin->w_destroy(widgetdialog.root_container);
-	widgetdialog.root_container = NULL;
-	widgetdialog.dialog = NULL;
+	gtkui_plugin->w_destroy(inst->root_container);
+	inst->root_container = NULL;
+	inst->dialog = NULL;
 }
 
-static int widgetdialog_dialog_create(__attribute__((unused)) void *user_data){
-	widgetdialog.dialog = GTK_DIALOG(gtk_dialog_new());
-		gtk_window_set_default_size(GTK_WINDOW(widgetdialog.dialog),widgetdialog.width,widgetdialog.height);
-		gtk_window_set_title(GTK_WINDOW(widgetdialog.dialog),"Testing");
-		gtk_window_set_modal(GTK_WINDOW(widgetdialog.dialog),false);
-		gtk_window_set_destroy_with_parent(GTK_WINDOW(widgetdialog.dialog),true);
-		g_signal_connect(G_OBJECT(widgetdialog.dialog),"destroy",G_CALLBACK(widgetdialog_on_dialog_destroy),NULL);
-		g_signal_connect(G_OBJECT(widgetdialog.dialog),"configure-event",G_CALLBACK(widgetdialog_on_resize),NULL);
+static int widgetdialog_dialog_create(void *user_data){
+	struct instance_s *inst = (struct instance_s*)user_data;
+
+	GtkWidget *main_window = gtkui_plugin->get_mainwin();
+	if(!main_window) return G_SOURCE_REMOVE;
+
+	inst->dialog = GTK_DIALOG(gtk_dialog_new());
+		gtk_window_set_transient_for(GTK_WINDOW(inst->dialog),GTK_WINDOW(main_window));
+		gtk_window_set_default_size(GTK_WINDOW(inst->dialog),inst->width,inst->height);
+		gtk_window_set_title(GTK_WINDOW(inst->dialog),"Testing");
+		gtk_window_set_modal(GTK_WINDOW(inst->dialog),false);
+		gtk_window_set_destroy_with_parent(GTK_WINDOW(inst->dialog),true);
+		g_signal_connect(G_OBJECT(inst->dialog),"destroy",G_CALLBACK(widgetdialog_on_dialog_destroy),inst);
+		g_signal_connect(G_OBJECT(inst->dialog),"configure-event",G_CALLBACK(widgetdialog_on_resize),inst);
 
 		//Root widget.
-		widgetdialog_root_widget_init(&widgetdialog.root_container,WIDGETDIALOG_CONFIG_LAYOUT);
-		gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(widgetdialog.dialog)),widgetdialog.root_container->widget,true,true,0);
+		rootwidget_init(&inst->root_container,WIDGETDIALOG_CONFIG_LAYOUT);
+		gtk_box_pack_start(GTK_BOX(gtk_dialog_get_content_area(inst->dialog)),inst->root_container->widget,true,true,0);
 
-		gtk_widget_show(GTK_WIDGET(widgetdialog.dialog));
+		gtk_widget_show(GTK_WIDGET(inst->dialog));
 	return G_SOURCE_REMOVE;
 }
 
-static int widgetdialog_dialog_destroy(__attribute__((unused)) void *user_data){
-	gtk_widget_destroy(GTK_WIDGET(widgetdialog.dialog));
+static int widgetdialog_dialog_destroy(void *user_data){
+	struct instance_s *inst = (struct instance_s*)user_data;
+	gtk_widget_destroy(GTK_WIDGET(inst->dialog));
 	return G_SOURCE_REMOVE;
 }
 
-static int widgetdialog_start(){
-	widgetdialog.dialog = NULL;
-	widgetdialog.root_container = NULL;
-	widgetdialog.width = deadbeef->conf_get_int("widgetdialog.window.width",256);
-	if(widgetdialog.width < 16) widgetdialog.width = 16;
-	widgetdialog.height = deadbeef->conf_get_int("widgetdialog.window.height",256);
-	if(widgetdialog.height < 16) widgetdialog.height = 16;
+static int action_toggle_dialog_callback(DB_plugin_action_t *action,__attribute__ ((unused)) ddb_action_context_t ctx){
+	struct instance_s *inst = action_get_instance(action);
+	g_idle_add(inst->dialog? widgetdialog_dialog_destroy : widgetdialog_dialog_create,inst);
 	return 0;
 }
 
-static int widgetdialog_stop(){
-	deadbeef->conf_set_int("widgetdialog.window.width",widgetdialog.width);
-	deadbeef->conf_set_int("widgetdialog.window.height",widgetdialog.height);
+static struct instance_s *instance_add(const char *id){
+	struct instance_s *inst = malloc(sizeof(struct instance_s));
+	if(!inst) return NULL;
+
+	if(!widgetdialog.insts){
+		widgetdialog.insts = inst;
+	}else{
+		DB_plugin_action_t **p = &widgetdialog.insts->action.next;
+		while(*p){p = &(*p)->next;};
+		*p = &inst->action;
+	}
+
+	inst->dialog = NULL;
+	inst->root_container = NULL;
+
+	inst->width = deadbeef->conf_get_int(WIDGETDIALOG_CONFIG_WIDTH,256);
+	if(inst->width < 16) inst->width = 16;
+
+	inst->height = deadbeef->conf_get_int(WIDGETDIALOG_CONFIG_HEIGHT,256);
+	if(inst->height < 16) inst->height = 16;
+
+	inst->action = (DB_plugin_action_t){
+		.title = "Toggle dialog",
+		.name = "widgetdialog_toggle",
+		.flags = DB_ACTION_COMMON | DB_ACTION_ADD_MENU,
+		.callback2 = action_toggle_dialog_callback,
+		.next = NULL
+	};
+
+	return inst;
+}
+
+static void instance_save(struct instance_s *inst){
+	deadbeef->conf_set_int(WIDGETDIALOG_CONFIG_WIDTH,inst->width);
+	deadbeef->conf_set_int(WIDGETDIALOG_CONFIG_HEIGHT,inst->height);
+	rootwidget_save(inst->root_container,WIDGETDIALOG_CONFIG_LAYOUT);
+}
+
+static int widgetdialog_start(){
+	widgetdialog.insts = NULL;
+	instance_add("test");
 	return 0;
 }
 
@@ -122,30 +146,25 @@ static int widgetdialog_connect(void){
 static int widgetdialog_message(uint32_t id,__attribute__((unused)) uintptr_t ctx,__attribute__((unused)) uint32_t p1,__attribute__((unused)) uint32_t p2){
 	switch(id){
 		case DB_EV_TERMINATE:
-			widgetdialog_root_widget_save(widgetdialog.root_container,WIDGETDIALOG_CONFIG_LAYOUT);
+			//TODO: Only saves when it is open and application terminates?
+			for(struct instance_s *inst = widgetdialog.insts; inst; inst = instance_next(inst)){
+				instance_save(inst);
+			}
 			break;
 	}
-	if(widgetdialog.root_container) send_messages_to_widgets(widgetdialog.root_container,id,ctx,p1,p2);
+
+	for(struct instance_s *inst = widgetdialog.insts; inst; inst = instance_next(inst)){
+		if(inst->root_container) send_messages_to_widgets(inst->root_container,id,ctx,p1,p2);
+	}
 	return 0;
 }
 
-static int action_toggle_dialog_callback(__attribute__ ((unused)) DB_plugin_action_t *action,ddb_action_context_t ctx){
-	g_idle_add(widgetdialog.dialog? widgetdialog_dialog_destroy : widgetdialog_dialog_create,NULL);
-	return 0;
-}
-static DB_plugin_action_t action_toggle_dialog = {
-	.title = "Toggle dialog",
-	.name = "widgetdialog_toggle",
-	.flags = DB_ACTION_COMMON | DB_ACTION_ADD_MENU,
-	.callback2 = action_toggle_dialog_callback,
-	.next = NULL
-};
-static DB_plugin_action_t *widgettoggle_get_actions(DB_playItem_t *it){
-    return &action_toggle_dialog;
+static DB_plugin_action_t *widgettoggle_get_actions(__attribute__((unused)) DB_playItem_t *it){
+	return widgetdialog.insts? &widgetdialog.insts->action : NULL;
 }
 
-static GtkDialog          *api_get_dialog(){return widgetdialog.dialog;}
-static ddb_gtkui_widget_t *api_get_rootwidget(){return widgetdialog.root_container;}
+static GtkDialog          *api_instance_get_dialog    (struct instance_s *inst){return inst->dialog;}
+static ddb_gtkui_widget_t *api_instance_get_rootwidget(struct instance_s *inst){return inst->root_container;}
 static ddb_widgetdialog_t plugin ={
 	.misc.plugin.api_vmajor = DB_API_VERSION_MAJOR,
 	.misc.plugin.api_vminor = DB_API_VERSION_MINOR,
@@ -184,11 +203,10 @@ static ddb_widgetdialog_t plugin ={
 	.misc.plugin.website = "https://github.org/EDT4/ddb_widgetdialog",
 	.misc.plugin.connect = widgetdialog_connect,
 	.misc.plugin.start   = widgetdialog_start,
-	.misc.plugin.stop    = widgetdialog_stop,
 	.misc.plugin.message = widgetdialog_message,
 	.misc.plugin.get_actions = &widgettoggle_get_actions,
-	.get_dialog     = api_get_dialog,
-	.get_rootwidget = api_get_rootwidget,
+	.instance_get_dialog     = api_instance_get_dialog,
+	.instance_get_rootwidget = api_instance_get_rootwidget,
 };
 
 __attribute__((visibility("default")))

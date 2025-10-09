@@ -157,3 +157,41 @@ void send_messages_to_widgets(ddb_gtkui_widget_t *w,uint32_t id,uintptr_t ctx,ui
 		w->message(w,id,ctx,p1,p2);
 	}
 }
+
+void rootwidget_init(ddb_gtkui_widget_t **container,const char *conf_field){
+	*container = gtkui_plugin->w_create("box");
+	gtk_widget_show((*container)->widget);
+
+	ddb_gtkui_widget_t *w = NULL;
+	deadbeef->conf_lock();
+	const char *json = deadbeef->conf_get_str_fast(conf_field,NULL);
+	if(json){
+		json_t *layout = json_loads(json,0,NULL);
+		if(layout != NULL){
+			if(w_create_from_json(layout,&w) >= 0){
+				gtkui_plugin->w_append(*container,w);
+			}
+			json_delete(layout);
+		}
+	}
+	deadbeef->conf_unlock();
+
+	if(!w){
+		w = gtkui_plugin->w_create("placeholder");
+		gtkui_plugin->w_append(*container,w);
+	}
+}
+
+void rootwidget_save(ddb_gtkui_widget_t *container,const char *conf_field){
+	if(!container || !container->children) return;
+
+	json_t *layout = w_save_widget_to_json(container->children);
+	if(layout){
+		char *layout_str = json_dumps(layout,JSON_COMPACT);
+		if(layout_str){
+			deadbeef->conf_set_str(conf_field,layout_str);
+			free(layout_str);
+		}
+		json_delete(layout);
+	}
+}
