@@ -11,12 +11,20 @@ ddb_gtkui_t *gtkui_plugin;
 
 //#define MAX(a,b) ((a)>=(b)? (a) : (b))
 
-#define CONFIGPREFIX_DIALOG_COUNT "widgetdialog.count"
+#define CONFIG_DIALOG_COUNT "widgetdialog.count"
 #define CONFIGPREFIX_LAYOUT "widgetdialog.layout"
 #define CONFIGPREFIX_WIDTH  "widgetdialog.width"
 #define CONFIGPREFIX_HEIGHT "widgetdialog.height"
+#define CONFIGPREFIX_DIALOG_TITLE "widgetdialog.windowtitle"
+#define CONFIGPREFIX_ACTION_TITLE "widgetdialog.actiontitle"
 
-#define CONFIG_MAX_LEN MAX(sizeof(CONFIGPREFIX_LAYOUT),MAX(sizeof(CONFIGPREFIX_WIDTH),sizeof(CONFIGPREFIX_HEIGHT)))
+#define CONFIGPREFIX_MAX_LEN \
+	MAX(sizeof(CONFIGPREFIX_LAYOUT),\
+	MAX(sizeof(CONFIGPREFIX_WIDTH),\
+	MAX(sizeof(CONFIGPREFIX_HEIGHT),\
+	MAX(sizeof(CONFIGPREFIX_DIALOG_TITLE),\
+	    sizeof(CONFIGPREFIX_ACTION_TITLE)\
+	))))
 
 //An instance is additional data to an action.
 //All actions in this plugin should always be attached to a struct instance_s.
@@ -51,7 +59,7 @@ static bool widgetdialog_on_resize(__attribute__((unused)) GtkWidget* self,__att
 }
 
 static void instance_save(struct instance_s *inst){
-	char buffer[CONFIG_MAX_LEN + 1 + sizeof(inst->config_id) + 1];
+	char buffer[CONFIGPREFIX_MAX_LEN + 1 + sizeof(inst->config_id) + 1];
 
 	snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_WIDTH,inst->config_id);
 	deadbeef->conf_set_int(buffer ,inst->width);
@@ -61,6 +69,12 @@ static void instance_save(struct instance_s *inst){
 
 	snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_LAYOUT,inst->config_id);
 	rootwidget_save(inst->root_container,buffer);
+
+	snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_DIALOG_TITLE,inst->config_id);
+	deadbeef->conf_set_str(buffer,inst->dialog_title);
+
+	snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_ACTION_TITLE,inst->config_id);
+	deadbeef->conf_set_str(buffer,inst->action_title);
 }
 
 static void widgetdialog_on_dialog_destroy(__attribute__((unused)) GtkDialog* self,gpointer user_data){
@@ -115,7 +129,7 @@ static int action_toggle_dialog_callback(DB_plugin_action_t *action,__attribute_
 	return 0;
 }
 
-static struct instance_s *instance_add(const char *id,const char *title){
+static struct instance_s *instance_add(const char *id){
 	struct instance_s *inst = malloc(sizeof(struct instance_s));
 	if(!inst) return NULL;
 
@@ -133,11 +147,9 @@ static struct instance_s *instance_add(const char *id,const char *title){
 
 	snprintf(inst->config_id,sizeof(inst->config_id),"%s",id);
 	snprintf(inst->action_id,sizeof(inst->action_id),"widgetdialog_toggle_%s",id);
-	snprintf(inst->action_title,sizeof(inst->action_title),"View/%s",title);
-	snprintf(inst->dialog_title,sizeof(inst->dialog_title),"%s",title);
 
 	{
-		char buffer[CONFIG_MAX_LEN + 1 + sizeof(inst->config_id) + 1];
+		char buffer[CONFIGPREFIX_MAX_LEN + 1 + sizeof(inst->config_id) + 1];
 
 		snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_WIDTH,inst->config_id);
 		inst->width = deadbeef->conf_get_int(buffer,256);
@@ -146,6 +158,20 @@ static struct instance_s *instance_add(const char *id,const char *title){
 		snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_HEIGHT,inst->config_id);
 		inst->height = deadbeef->conf_get_int(buffer,256);
 		if(inst->height < 16) inst->height = 16;
+
+		deadbeef->conf_lock();
+		{
+			snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_ACTION_TITLE,inst->config_id);
+			const char *s = deadbeef->conf_get_str_fast(buffer,NULL);
+			if(s){snprintf(inst->action_title,sizeof(inst->action_title),"%s",s);}
+			else {snprintf(inst->action_title,sizeof(inst->action_title),"View/Dialog %s",id);}
+		}{
+			snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_DIALOG_TITLE,inst->config_id);
+			const char *s = deadbeef->conf_get_str_fast(buffer,NULL);
+			if(s){snprintf(inst->dialog_title,sizeof(inst->dialog_title),"%s",s);}
+			else {snprintf(inst->dialog_title,sizeof(inst->dialog_title),"Dialog %s",id);}
+		}
+		deadbeef->conf_unlock();
 	}
 
 	inst->action = (DB_plugin_action_t){
@@ -162,11 +188,10 @@ static struct instance_s *instance_add(const char *id,const char *title){
 static int widgetdialog_start(){
 	widgetdialog.insts = NULL;
 
-	for(int i=0; i<deadbeef->conf_get_int(CONFIGPREFIX_DIALOG_COUNT,0); i+=1){
+	for(int i=0; i<deadbeef->conf_get_int(CONFIG_DIALOG_COUNT,0); i+=1){
 		//TODO: just a temporary solution
-		char buffer1[1+20 + 1]; snprintf(buffer1,sizeof(buffer1),"d%d",i);
-		char buffer2[7+20 + 1]; snprintf(buffer2,sizeof(buffer2),"Dialog %d",i);
-		instance_add(buffer1,buffer2);
+		char buffer[1+20 + 1]; snprintf(buffer,sizeof(buffer),"d%d",i);
+		instance_add(buffer);
 	}
 
 	return 0;
@@ -202,7 +227,7 @@ static DB_plugin_action_t *widgettoggle_get_actions(__attribute__((unused)) DB_p
 }
 
 static const char settings_dlg[] =
-	"property \"Dialogs (requires restart)\" spinbtn[0,40,1] " CONFIGPREFIX_DIALOG_COUNT " 0;"
+	"property \"Dialogs (requires restart)\" spinbtn[0,40,1] " CONFIG_DIALOG_COUNT " 0;"
 ;
 
 static struct instance_s *api_get_instance(const char *config_id){
