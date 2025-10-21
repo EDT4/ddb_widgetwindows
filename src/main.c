@@ -189,7 +189,7 @@ static int widgetdialog_start(){
 	widgetdialog.insts = NULL;
 
 	for(int i=0; i<deadbeef->conf_get_int(CONFIG_DIALOG_COUNT,0); i+=1){
-		//TODO: just a temporary solution
+		//TODO: just a temporary solution. maybe use conf_find, see deadbeef/src/playlist.c:pl_load_all
 		char buffer[1+20 + 1]; snprintf(buffer,sizeof(buffer),"d%d",i);
 		instance_add(buffer);
 	}
@@ -256,12 +256,19 @@ static ddb_widgetdialog_t plugin ={
 	.misc.plugin.name = "Widget Dialog",
 	.misc.plugin.descr =
 		"Customisable widget dialogs.\n"
+		"\n"
+		"Adds dialog windows that can be toggled by actions.\n"
+		"The dialog windows will contain a root widget which can be modified in Design Mode,\n"
+		"the same way as widgets in the main window.\n"
+		"The root widgets are saved in the configuration in the same way as the main window root widget is.\n"
+		"\n"
+		"Instructions:\n"
 		"Set the number of dialogs in the plugin configuration. Restart for changes.\n"
 		"Open a dialog by using the actions found in \"View/Dialog *\" (widgetdialog_toggle_*).\n"
 		"In the new dialog, widgets can be added and modified in Design Mode.\n"
 		"To save the layout changes made in a dialog, the window must be closed while in Design Mode.\n"
 		"\n"
-		"This plugin is not finished as of writing, but should be functional.\n"
+		"This plugin is not finished as of writing, in particular regarding the GUI configuration, but should be functional otherwise.\n"
 	,
 	.misc.plugin.copyright =
 		"MIT License\n"
