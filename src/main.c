@@ -116,6 +116,7 @@ static int widgetwindows_window_create(void *user_data){
 		gtk_container_add(GTK_CONTAINER(inst->window),inst->root_container->widget);
 
 		gtk_widget_show(GTK_WIDGET(inst->window));
+    	gtk_window_present(GTK_WINDOW(inst->window));
 	return G_SOURCE_REMOVE;
 }
 
