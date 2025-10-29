@@ -1,5 +1,4 @@
 #include <gtk/gtk.h>
-#include <jansson.h>
 #include <deadbeef/deadbeef.h>
 #include <deadbeef/gtkui_api.h>
 #include <stdbool.h>
@@ -224,7 +223,7 @@ static int widgetwindows_message(uint32_t id,uintptr_t ctx,uint32_t p1,uint32_t 
 	}
 
 	for(struct instance_s *inst = widgetwindows.insts; inst; inst = instance_next(inst)){
-		if(inst->root_container) send_messages_to_widgets(inst->root_container,id,ctx,p1,p2);
+		if(inst->root_container) gtkui_plugin->w_send_message(inst->root_container,id,ctx,p1,p2);
 	}
 	return 0;
 }
