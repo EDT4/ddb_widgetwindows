@@ -37,13 +37,14 @@ ddb_gtkui_t *gtkui_plugin;
 struct instance_s{
 	GtkWindow *window;
 	ddb_gtkui_widget_t *root_container;
-	char config_id[50];
-	char action_id[50];
+	char config_id[WIDGETWINDOWS_ID_MAX_LEN];
+	char action_id[WIDGETWINDOWS_ID_MAX_LEN];
 	char action_title[100];
 	char window_title[100];
 	int width;
 	int height;
 	unsigned char flags; //Flags. See FLAG_*.
+	guint toggle_callback_id;
 	gulong destroy_handler_id;
 	gulong configure_handler_id;
 	DB_plugin_action_t action;
@@ -137,9 +138,15 @@ static int widgetwindows_window_destroy(void *user_data){
 	return G_SOURCE_REMOVE;
 }
 
+static void widgetwindows_toggle_end_callback(void *user_data){
+	((struct instance_s*)user_data)->toggle_callback_id = 0;
+}
+
 static int action_toggle_window_callback(DB_plugin_action_t *action,__attribute__ ((unused)) ddb_action_context_t ctx){
 	struct instance_s *inst = action_get_instance(action);
-	g_idle_add(inst->window? widgetwindows_window_destroy : widgetwindows_window_create,inst);
+	if(inst->toggle_callback_id == 0){
+		g_idle_add_full(G_PRIORITY_LOW,inst->window? widgetwindows_window_destroy : widgetwindows_window_create,inst,widgetwindows_toggle_end_callback);
+	}
 	return 0;
 }
 
@@ -151,13 +158,19 @@ static struct instance_s *instance_add(const char *id){
 	if(!widgetwindows.insts){
 		widgetwindows.insts = inst;
 	}else{
+		if(strncmp(id,widgetwindows.insts->config_id,WIDGETWINDOWS_ID_MAX_LEN) == 0) return NULL;
+
 		DB_plugin_action_t **p = &widgetwindows.insts->action.next;
-		while(*p){p = &(*p)->next;};
+		while(*p){
+			if(strncmp(id,action_get_instance(*p)->config_id,WIDGETWINDOWS_ID_MAX_LEN) == 0) return NULL;
+			p = &(*p)->next;
+		}
 		*p = &inst->action;
 	}
 
 	inst->window = NULL;
 	inst->root_container = NULL;
+	inst->toggle_callback_id = 0;
 
 	snprintf(inst->config_id,sizeof(inst->config_id),"%s",id);
 	snprintf(inst->action_id,sizeof(inst->action_id),"widgetwindows_toggle_%s",id);
@@ -206,7 +219,7 @@ static int widgetwindows_start(){
 	widgetwindows.insts = NULL;
 
 	for(int i=0,n=deadbeef->conf_get_int(CONFIG_WINDOW_COUNT,0); i<n; i+=1){
-		//TODO: just a temporary solution. maybe use conf_find, see deadbeef/src/playlist.c:pl_load_all
+		//TODO: just a temporary solution. maybe use conf_find, see deadbeef/src/playlist.c:pl_load_all or a semicolon separated field in the config
 		char buffer[1+20 + 1]; snprintf(buffer,sizeof(buffer),"%05d",i);
 		instance_add(buffer);
 	}
@@ -276,6 +289,10 @@ static size_t api_count_instances(){
 	}
 	return out;
 }
+static void                api_instance_open            (struct instance_s *inst){if(inst->toggle_callback_id == 0 && !inst->window) inst->toggle_callback_id = g_idle_add_full(G_PRIORITY_LOW,widgetwindows_window_create,inst,widgetwindows_toggle_end_callback);}
+static void                api_instance_close           (struct instance_s *inst){if(inst->toggle_callback_id == 0 && inst->window)  inst->toggle_callback_id = g_idle_add_full(G_PRIORITY_LOW,widgetwindows_window_destroy,inst,widgetwindows_toggle_end_callback);}
+static void                api_instance_toggle          (struct instance_s *inst){if(inst->toggle_callback_id == 0) inst->toggle_callback_id = g_idle_add_full(G_PRIORITY_LOW,inst->window? widgetwindows_window_destroy : widgetwindows_window_create,inst,widgetwindows_toggle_end_callback);}
+static bool                api_instance_is_visible      (struct instance_s *inst){return inst->window != NULL;}
 static GtkWindow          *api_instance_get_window      (struct instance_s *inst){return inst->window;}
 static ddb_gtkui_widget_t *api_instance_get_rootwidget  (struct instance_s *inst){return inst->root_container;}
 static const char         *api_instance_get_config_id   (struct instance_s *inst){return inst->config_id;}
@@ -311,7 +328,7 @@ static ddb_widgetwindows_t plugin ={
 		"In the new window, widgets can be added and modified in Design Mode.\n"
 		"To save the layout changes made in a window, the window must be closed while in Design Mode.\n"
 		"\n"
-		"This plugin is not finished as of writing, in particular regarding the GUI configuration (instead, modify in the config), but should be functional otherwise.\n"
+		"This plugin is not finished as of writing, in particular regarding the GUI configuration (instead, modify in the config file), but should be functional otherwise.\n"
 	,
 	.misc.plugin.copyright = widgetwindows_license,
 	.misc.plugin.website = "https://github.org/EDT4/ddb_widgetwindows",
@@ -324,12 +341,17 @@ static ddb_widgetwindows_t plugin ={
 	.get_instance_from_rootwidget = api_get_instance_from_rootwidget,
 	.get_instance_by_index        = api_get_instance_by_index,
 	.count_instances              = api_count_instances,
+	.instance_open                = api_instance_open,
+	.instance_close               = api_instance_close,
+	.instance_toggle              = api_instance_toggle,
+	.instance_is_visible          = api_instance_is_visible,
 	.instance_get_window          = api_instance_get_window,
 	.instance_get_rootwidget      = api_instance_get_rootwidget,
 	.instance_get_config_id       = api_instance_get_config_id,
 	.instance_get_action_id       = api_instance_get_action_id,
 	.instance_get_action_title    = api_instance_get_action_title,
 	.instance_get_window_title    = api_instance_get_window_title,
+	.instance_add                 = instance_add,
 };
 
 __attribute__((visibility("default")))

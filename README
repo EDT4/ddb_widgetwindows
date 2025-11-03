@@ -1,0 +1,8 @@
+Adds windows that can be toggled by actions.
+
+Widgets can be added to the windows.
+
+An API exists. See src/api.h.
+
+Build:
+`make gtk3`
