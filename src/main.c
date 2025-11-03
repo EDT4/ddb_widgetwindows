@@ -14,16 +14,23 @@ ddb_gtkui_t *gtkui_plugin;
 #define CONFIGPREFIX_LAYOUT "widgetwindows.layout"
 #define CONFIGPREFIX_WIDTH  "widgetwindows.width"
 #define CONFIGPREFIX_HEIGHT "widgetwindows.height"
+#define CONFIGPREFIX_FLAGS  "widgetwindows.flags"
 #define CONFIGPREFIX_WINDOW_TITLE "widgetwindows.windowtitle"
 #define CONFIGPREFIX_ACTION_TITLE "widgetwindows.actiontitle"
 
+//Used for buffers containing a config key.
 #define CONFIGPREFIX_MAX_LEN \
 	MAX(sizeof(CONFIGPREFIX_LAYOUT),\
 	MAX(sizeof(CONFIGPREFIX_WIDTH),\
 	MAX(sizeof(CONFIGPREFIX_HEIGHT),\
+	MAX(sizeof(CONFIGPREFIX_FLAGS),\
 	MAX(sizeof(CONFIGPREFIX_WINDOW_TITLE),\
 	    sizeof(CONFIGPREFIX_ACTION_TITLE)\
-	))))
+	)))))
+
+#define FLAG_RESIZABLE     0x1
+#define FLAG_UPDATE_RESIZE 0x2
+#define FLAG_FOCUS         0x4
 
 //An instance is additional data to an action.
 //All actions in this plugin should always be attached to a struct instance_s.
@@ -36,9 +43,10 @@ struct instance_s{
 	char window_title[100];
 	int width;
 	int height;
-	DB_plugin_action_t action;
+	unsigned char flags; //Flags. See FLAG_*.
 	gulong destroy_handler_id;
 	gulong configure_handler_id;
+	DB_plugin_action_t action;
 };
 
 struct widgetwindows_s{
@@ -52,10 +60,12 @@ static inline struct instance_s *action_get_instance(DB_plugin_action_t *ptr){re
 //Just uses the linked list of the action.
 static inline struct instance_s *instance_next(struct instance_s *inst){return inst->action.next? action_get_instance(inst->action.next) : NULL;}
 
-static bool widgetwindows_on_resize(__attribute__((unused)) GtkWidget* self,__attribute__((unused)) GdkEventConfigure *event,gpointer user_data){
-	struct instance_s *inst = (struct instance_s*)user_data;
-	//TODO: also possible to use width/height of event
-	gtk_window_get_size(GTK_WINDOW(inst->window),&inst->width,&inst->height);
+static bool widgetwindows_on_resize(__attribute__((unused)) GtkWidget* self,GdkEventConfigure *event,struct instance_s *inst){
+	//gtk_window_get_size(GTK_WINDOW(inst->window),&inst->width,&inst->height);
+	if(inst->flags & FLAG_UPDATE_RESIZE){
+		inst->width = event->width;
+		inst->height = event->height;
+	}
 	return false;
 }
 
@@ -68,6 +78,9 @@ static void instance_save(struct instance_s *inst){
 	snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_HEIGHT,inst->config_id);
 	deadbeef->conf_set_int(buffer,inst->height);
 
+	snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_FLAGS,inst->config_id);
+	deadbeef->conf_set_int(buffer,(unsigned char)inst->flags);
+
 	snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_LAYOUT,inst->config_id);
 	rootwidget_save(inst->root_container,buffer);
 
@@ -78,9 +91,7 @@ static void instance_save(struct instance_s *inst){
 	deadbeef->conf_set_str(buffer,inst->action_title);
 }
 
-static void widgetwindows_on_window_destroy(__attribute__((unused)) GtkWidget* self,gpointer user_data){
-	struct instance_s *inst = (struct instance_s*)user_data;
-
+static void widgetwindows_on_window_destroy(__attribute__((unused)) GtkWidget* self,struct instance_s *inst){
 	instance_save(inst);
 
 	for(ddb_gtkui_widget_t *c = inst->root_container->children; c; c = c->next){
@@ -105,6 +116,7 @@ static int widgetwindows_window_create(void *user_data){
 		gtk_window_set_title(GTK_WINDOW(inst->window),inst->window_title);
 		gtk_window_set_modal(GTK_WINDOW(inst->window),false);
 		gtk_window_set_destroy_with_parent(GTK_WINDOW(inst->window),true);
+		gtk_window_set_resizable(GTK_WINDOW(inst->window),inst->flags & FLAG_RESIZABLE);
 		inst->destroy_handler_id = g_signal_connect(G_OBJECT(inst->window),"destroy",G_CALLBACK(widgetwindows_on_window_destroy),inst);
 		inst->configure_handler_id = g_signal_connect(G_OBJECT(inst->window),"configure-event",G_CALLBACK(widgetwindows_on_resize),inst);
 
@@ -115,7 +127,7 @@ static int widgetwindows_window_create(void *user_data){
 		gtk_container_add(GTK_CONTAINER(inst->window),inst->root_container->widget);
 
 		gtk_widget_show(GTK_WIDGET(inst->window));
-    	gtk_window_present(GTK_WINDOW(inst->window));
+    	if(inst->flags & FLAG_FOCUS) gtk_window_present(GTK_WINDOW(inst->window));
 	return G_SOURCE_REMOVE;
 }
 
@@ -161,6 +173,9 @@ static struct instance_s *instance_add(const char *id){
 		inst->height = deadbeef->conf_get_int(buffer,256);
 		if(inst->height < 16) inst->height = 16;
 
+		snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_FLAGS,inst->config_id);
+		inst->flags = (unsigned char)deadbeef->conf_get_int(buffer,0xff);
+
 		deadbeef->conf_lock();
 		{
 			snprintf(buffer,sizeof(buffer),"%s.%s",CONFIGPREFIX_ACTION_TITLE,inst->config_id);
@@ -190,7 +205,7 @@ static struct instance_s *instance_add(const char *id){
 static int widgetwindows_start(){
 	widgetwindows.insts = NULL;
 
-	for(int i=0; i<deadbeef->conf_get_int(CONFIG_WINDOW_COUNT,0); i+=1){
+	for(int i=0,n=deadbeef->conf_get_int(CONFIG_WINDOW_COUNT,0); i<n; i+=1){
 		//TODO: just a temporary solution. maybe use conf_find, see deadbeef/src/playlist.c:pl_load_all
 		char buffer[1+20 + 1]; snprintf(buffer,sizeof(buffer),"%05d",i);
 		instance_add(buffer);
@@ -242,6 +257,25 @@ static struct instance_s *api_get_instance(const char *config_id){
 	}
 	return NULL;
 }
+static struct instance_s *api_get_instance_from_rootwidget(ddb_gtkui_widget_t *rootwidget){
+	for(struct instance_s *inst = widgetwindows.insts; inst; inst = instance_next(inst)){
+		if(inst->root_container == rootwidget) return inst;
+	}
+	return NULL;
+}
+static struct instance_s *api_get_instance_by_index(size_t i){
+	for(struct instance_s *inst = widgetwindows.insts; inst; inst = instance_next(inst)){
+		if(i-- == 0) return inst;
+	}
+	return NULL;
+}
+static size_t api_count_instances(){
+	size_t out = 0;
+	for(struct instance_s *inst = widgetwindows.insts; inst; inst = instance_next(inst)){
+		out+= 1;
+	}
+	return out;
+}
 static GtkWindow          *api_instance_get_window      (struct instance_s *inst){return inst->window;}
 static ddb_gtkui_widget_t *api_instance_get_rootwidget  (struct instance_s *inst){return inst->root_container;}
 static const char         *api_instance_get_config_id   (struct instance_s *inst){return inst->config_id;}
@@ -263,8 +297,8 @@ static ddb_widgetwindows_t plugin ={
 	.misc.plugin.descr =
 		"Customisable widget windows.\n"
 		"\n"
-		"Adds window windows that can be toggled by actions.\n"
-		"The window windows will contain a root widget which can be modified in Design Mode,\n"
+		"Adds windows that can be toggled by actions.\n"
+		"The windows will contain a root widget that can be modified in Design Mode,\n"
 		"the same way as widgets in the main window.\n"
 		"The root widgets are saved in the configuration in the same way as the main window root widget is.\n"
 		"\n"
@@ -274,7 +308,7 @@ static ddb_widgetwindows_t plugin ={
 		"In the new window, widgets can be added and modified in Design Mode.\n"
 		"To save the layout changes made in a window, the window must be closed while in Design Mode.\n"
 		"\n"
-		"This plugin is not finished as of writing, in particular regarding the GUI configuration, but should be functional otherwise.\n"
+		"This plugin is not finished as of writing, in particular regarding the GUI configuration (instead, modify in the config), but should be functional otherwise.\n"
 	,
 	.misc.plugin.copyright =
 		"MIT License\n"
@@ -305,13 +339,16 @@ static ddb_widgetwindows_t plugin ={
 	.misc.plugin.message = widgetwindows_message,
 	.misc.plugin.get_actions = &widgettoggle_get_actions,
 	.misc.plugin.configdialog = settings_dlg,
-	.get_instance              = api_get_instance,
-	.instance_get_window       = api_instance_get_window,
-	.instance_get_rootwidget   = api_instance_get_rootwidget,
-	.instance_get_config_id    = api_instance_get_config_id,
-	.instance_get_action_id    = api_instance_get_action_id,
-	.instance_get_action_title = api_instance_get_action_title,
-	.instance_get_window_title = api_instance_get_window_title,
+	.get_instance                 = api_get_instance,
+	.get_instance_from_rootwidget = api_get_instance_from_rootwidget,
+	.get_instance_by_index        = api_get_instance_by_index,
+	.count_instances              = api_count_instances,
+	.instance_get_window          = api_instance_get_window,
+	.instance_get_rootwidget      = api_instance_get_rootwidget,
+	.instance_get_config_id       = api_instance_get_config_id,
+	.instance_get_action_id       = api_instance_get_action_id,
+	.instance_get_action_title    = api_instance_get_action_title,
+	.instance_get_window_title    = api_instance_get_window_title,
 };
 
 __attribute__((visibility("default")))
