@@ -93,7 +93,7 @@ static void instance_save(struct instance_s *inst){
 }
 
 static void widgetwindows_on_window_destroy(__attribute__((unused)) GtkWidget* self,struct instance_s *inst){
-	instance_save(inst);
+	instance_save(inst); //TODO: Should probably be running on the main thread
 
 	for(ddb_gtkui_widget_t *c = inst->root_container->children; c; c = c->next){
 		gtkui_plugin->w_remove(inst->root_container,c);
@@ -241,11 +241,13 @@ static int widgetwindows_message(uint32_t id,uintptr_t ctx,uint32_t p1,uint32_t 
 		case DB_EV_TERMINATE:
 			//Save when windows are open and application terminates.
 			for(struct instance_s *inst = widgetwindows.insts; inst; inst = instance_next(inst)){
-				instance_save(inst);
-				g_signal_handler_disconnect(G_OBJECT(inst->window),inst->destroy_handler_id);
-				inst->destroy_handler_id = 0;
-				g_signal_handler_disconnect(G_OBJECT(inst->window),inst->configure_handler_id);
-				inst->configure_handler_id = 0;
+				if(inst->window){
+					instance_save(inst);
+					g_signal_handler_disconnect(G_OBJECT(inst->window),inst->destroy_handler_id);
+					inst->destroy_handler_id = 0;
+					g_signal_handler_disconnect(G_OBJECT(inst->window),inst->configure_handler_id);
+					inst->configure_handler_id = 0;
+				}
 			}
 			break;
 	}
@@ -261,6 +263,7 @@ static DB_plugin_action_t *widgettoggle_get_actions(__attribute__((unused)) DB_p
 }
 
 static const char settings_dlg[] =
+	//TODO: Possible to implement without restart. Only need to reload actions. Fix later.
 	"property \"Windows (requires restart)\" spinbtn[0,40,1] " CONFIG_WINDOW_COUNT " 0;"
 ;
 
